@@ -2,7 +2,8 @@
 // a la tabla "usuarios", guardando las claves como hash bcrypt.
 //   npm run importar-usuarios                 -> usa scripts/usuarios.txt
 //   npm run importar-usuarios -- ruta/otro.txt
-require('dotenv').config();
+// ENV_FILE permite usar otro archivo de configuracion (por ejemplo .env.nube)
+require('dotenv').config({ path: process.env.ENV_FILE || '.env' });
 const fs = require('fs');
 const path = require('path');
 const bcrypt = require('bcryptjs');

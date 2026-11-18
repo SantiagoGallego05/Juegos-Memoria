@@ -2,7 +2,8 @@
 // de entorno). Sirve sobre todo para la base de datos en la nube, donde no se
 // puede (ni hace falta) ejecutar CREATE DATABASE.
 //   npm run crear-tablas
-require('dotenv').config();
+// ENV_FILE permite usar otro archivo de configuracion (por ejemplo .env.nube)
+require('dotenv').config({ path: process.env.ENV_FILE || '.env' });
 const fs = require('fs');
 const path = require('path');
 const pool = require('../db');

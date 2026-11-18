@@ -2,10 +2,12 @@ import { $, mostrar } from './nav.js';
 import { iniciarSesionUI, abrirRestablecer } from './sesion.js';
 import { iniciarParejas, abrirParejas, detenerParejas } from './parejas.js';
 import { iniciarRecuerdos, abrirRecuerdos, detenerRecuerdos } from './recuerdos.js';
+import { iniciarImagenes } from './imagenes.js';
 
 iniciarSesionUI();
 iniciarParejas();
 iniciarRecuerdos();
+iniciarImagenes();
 
 $('#btn-abrir-parejas').addEventListener('click', abrirParejas);
 $('#btn-abrir-recuerdos').addEventListener('click', abrirRecuerdos);

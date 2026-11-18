@@ -41,8 +41,13 @@
       <label for="datos-parejas-paciente">Nombre del adulto mayor</label>
       <input id="datos-parejas-paciente" name="paciente" type="text" required maxlength="100" autocomplete="off">
 
+      <fieldset class="niveles">
+        <legend>Dificultad (tamaño del tablero)</legend>
+        <div class="opciones" id="niveles-parejas"></div>
+      </fieldset>
+
       <p class="mensaje-error" id="datos-parejas-mensaje" role="alert"></p>
-      <p class="nota">Al terminar, se guardan los intentos y el tiempo de la partida.</p>
+      <p class="nota">Más tarjetas, más difícil. Al terminar se guardan el tablero, los intentos y el tiempo de la partida.</p>
 
       <button type="submit" class="boton boton-verde">Iniciar juego</button>
       <button type="button" class="boton boton-azul" id="datos-parejas-historial">Ver partidas guardadas</button>
@@ -54,7 +59,7 @@
   <!-- ========== JUEGO DE PAREJAS ========== -->
   <section id="pantalla-parejas" class="pantalla" aria-labelledby="t-parejas">
     <div class="barra-superior">
-      <button type="button" class="boton boton-gris boton-chico" id="parejas-cambiar">← Cambiar de adulto mayor</button>
+      <button type="button" class="boton boton-gris boton-chico" id="parejas-cambiar">← Cambiar jugador o dificultad</button>
     </div>
     <h1 id="t-parejas">Juego de Parejas</h1>
     <p class="subtitulo" id="parejas-jugador">Encuentre las parejas</p>
@@ -200,6 +205,24 @@
     </form>
   </section>
 
+  <!-- ========== RECUERDOS: MIS IMÁGENES ========== -->
+  <section id="pantalla-mis-imagenes" class="pantalla" aria-labelledby="t-mis-imagenes">
+    <div class="barra-superior">
+      <button type="button" class="boton boton-gris boton-chico" id="imagenes-volver">← Volver</button>
+    </div>
+    <h1 id="t-mis-imagenes">Mis imágenes</h1>
+    <p class="subtitulo">Suba fotos propias (por ejemplo, de la familia) para usarlas en el Juego de Recuerdos.
+      Solo usted puede verlas. Para jugar solo con ellas necesita al menos 5.</p>
+
+    <div class="fila-botones">
+      <button type="button" class="boton boton-azul" id="imagenes-elegir">📷 Elegir fotos</button>
+      <input type="file" id="imagenes-archivo" accept="image/*" multiple hidden>
+    </div>
+    <p class="estado-grabacion" id="imagenes-contador" role="status" aria-live="polite"></p>
+    <p class="mensaje-error" id="imagenes-mensaje" role="alert"></p>
+    <ul id="imagenes-galeria" class="galeria"></ul>
+  </section>
+
   <!-- ========== RECUERDOS: DATOS DEL ADULTO MAYOR ========== -->
   <section id="pantalla-datos" class="pantalla" aria-labelledby="t-datos">
     <div class="barra-superior">
@@ -212,11 +235,33 @@
       <label for="datos-paciente">Nombre del adulto mayor</label>
       <input id="datos-paciente" name="paciente" type="text" required maxlength="100" autocomplete="off">
 
+      <fieldset class="niveles">
+        <legend>¿Qué imágenes usar?</legend>
+        <div class="opciones">
+          <label class="opcion">
+            <input type="radio" name="fuente" value="juego" checked>
+            <span class="opcion-titulo">Las del juego</span>
+            <span class="opcion-detalle">Imágenes incluidas en la aplicación</span>
+          </label>
+          <label class="opcion">
+            <input type="radio" name="fuente" value="mias">
+            <span class="opcion-titulo">Solo las mías</span>
+            <span class="opcion-detalle" id="fuente-mias-detalle">Fotos que usted subió</span>
+          </label>
+          <label class="opcion">
+            <input type="radio" name="fuente" value="todas">
+            <span class="opcion-titulo">Las del juego y las mías</span>
+            <span class="opcion-detalle">Se mezclan al azar</span>
+          </label>
+        </div>
+      </fieldset>
+
       <p class="mensaje-error" id="datos-mensaje" role="alert"></p>
       <p class="nota">Se mostrarán 5 imágenes al azar. El adulto mayor podrá escribir o decir lo que ve o recuerda de cada una.</p>
 
       <button type="submit" class="boton boton-verde" id="datos-iniciar">Iniciar juego</button>
       <button type="button" class="boton boton-azul" id="datos-historial">Ver partidas guardadas</button>
+      <button type="button" class="boton boton-azul" id="datos-imagenes">📷 Mis imágenes (subir fotos)</button>
       <button type="button" class="boton boton-gris" id="datos-correo">Correo de recuperación</button>
       <button type="button" class="boton boton-gris" id="datos-salir">Cerrar sesión</button>
     </form>
@@ -284,7 +329,7 @@
     <div class="tabla-contenedor">
       <table class="tabla-parejas" id="historial-parejas-tabla" hidden>
         <thead>
-          <tr><th scope="col">Adulto mayor</th><th scope="col">Fecha</th><th scope="col">Intentos</th><th scope="col">Tiempo</th></tr>
+          <tr><th scope="col">Adulto mayor</th><th scope="col">Fecha</th><th scope="col">Tablero</th><th scope="col">Intentos</th><th scope="col">Tiempo</th></tr>
         </thead>
         <tbody></tbody>
       </table>

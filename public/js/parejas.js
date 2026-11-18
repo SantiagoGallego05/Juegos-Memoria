@@ -1,18 +1,34 @@
-// Juego de Parejas (version web): exige sesion, pide el nombre del adulto mayor
-// y guarda intentos y tiempo en MySQL al terminar cada partida.
+// Juego de Parejas (version web): exige sesion, pide el nombre del adulto mayor y
+// la dificultad (tamaño del tablero), y guarda tablero, intentos y tiempo en MySQL
+// al terminar cada partida.
 import { $, mostrar, mensaje, formatearFecha } from './nav.js';
 import { api } from './api.js';
 import { obtenerUsuario, exigirSesion, sesionExpirada, cerrarSesion } from './sesion.js';
 
-const PAREJAS = [
-  { nombre: 'MANZANA', simbolo: '🍎' },
-  { nombre: 'CAFÉ', simbolo: '☕' },
-  { nombre: 'CASA', simbolo: '🏠' },
-  { nombre: 'FLORES', simbolo: '🌸' }
+// Debe coincidir con TABLEROS en server.js
+const NIVELES = [
+  { id: 'facil',   nombre: 'Fácil',   columnas: 3, filas: 2 },
+  { id: 'normal',  nombre: 'Normal',  columnas: 4, filas: 2 },
+  { id: 'medio',   nombre: 'Medio',   columnas: 4, filas: 3 },
+  { id: 'dificil', nombre: 'Difícil', columnas: 4, filas: 4 },
+  { id: 'experto', nombre: 'Experto', columnas: 5, filas: 4 }
+];
+const NIVEL_INICIAL = 'normal';
+
+// El tablero mas grande usa 10 parejas; se sortean entre estas 12
+const SIMBOLOS = [
+  { nombre: 'MANZANA', simbolo: '🍎' }, { nombre: 'CAFÉ', simbolo: '☕' },
+  { nombre: 'CASA', simbolo: '🏠' },    { nombre: 'FLORES', simbolo: '🌸' },
+  { nombre: 'PERRO', simbolo: '🐶' },   { nombre: 'CARRO', simbolo: '🚗' },
+  { nombre: 'BALÓN', simbolo: '⚽' },   { nombre: 'PASTEL', simbolo: '🎂' },
+  { nombre: 'SOL', simbolo: '🌞' },     { nombre: 'PEZ', simbolo: '🐟' },
+  { nombre: 'GLOBO', simbolo: '🎈' },   { nombre: 'LIBRO', simbolo: '📖' }
 ];
 const MS_ANTES_DE_COMPROBAR = 800;
 const MS_ANTES_DE_OCULTAR = 500;
 
+let nivel = NIVELES.find((n) => n.id === NIVEL_INICIAL);
+let totalParejas = 0;
 let cartas = [];
 let primera = null;
 let bloqueado = false;
@@ -46,24 +62,63 @@ function formatearTiempo(segundos) {
   return `${m}:${s}`;
 }
 
+function describirTablero(columnas, filas) {
+  const n = NIVELES.find((x) => x.columnas === columnas && x.filas === filas);
+  return n ? `${n.nombre} (${columnas} × ${filas})` : `${columnas} × ${filas}`;
+}
+
 function actualizarInformacion() {
-  $('#parejas-contador').textContent = `Parejas: ${encontradas} / ${PAREJAS.length}`;
+  $('#parejas-contador').textContent = `Parejas: ${encontradas} / ${totalParejas}`;
   $('#parejas-intentos').textContent = `Intentos: ${intentos}`;
 }
 
 // ---------------------------------------------------------------
-// Entrada: sesion y datos del adulto mayor
+// Entrada: sesion, adulto mayor y dificultad
 // ---------------------------------------------------------------
 export function abrirParejas() {
   return exigirSesion({ titulo: 'Juego de Parejas', alIniciar: irADatosParejas });
 }
 
-function irADatosParejas() {
+function pintarNiveles() {
+  const contenedor = $('#niveles-parejas');
+  contenedor.replaceChildren();
+  NIVELES.forEach((n) => {
+    const etiqueta = document.createElement('label');
+    etiqueta.className = 'opcion';
+
+    const radio = document.createElement('input');
+    radio.type = 'radio';
+    radio.name = 'nivel';
+    radio.value = n.id;
+    radio.defaultChecked = n.id === NIVEL_INICIAL;
+
+    const titulo = document.createElement('span');
+    titulo.className = 'opcion-titulo';
+    titulo.textContent = n.nombre;
+
+    const detalle = document.createElement('span');
+    detalle.className = 'opcion-detalle';
+    detalle.textContent = `${n.columnas} × ${n.filas} · ${n.columnas * n.filas} tarjetas (${(n.columnas * n.filas) / 2} parejas)`;
+
+    etiqueta.append(radio, titulo, detalle);
+    contenedor.append(etiqueta);
+  });
+}
+
+// conservar=true: se vuelve desde el juego y se recuerdan el nombre y el nivel
+function irADatosParejas(conservar = false) {
   detenerParejas();
   const usuario = obtenerUsuario();
   $('#datos-parejas-responsable').textContent =
     `Responsable: ${usuario.nombreResponsable} (usuario: ${usuario.usuario})`;
+
   $('#form-datos-parejas').reset();
+  if (conservar && paciente) {
+    $('#datos-parejas-paciente').value = paciente;
+    const radio = document.querySelector(`#niveles-parejas input[value="${nivel.id}"]`);
+    if (radio) radio.checked = true;
+  }
+
   mensaje('#datos-parejas-mensaje', usuario.correo ? '' :
     'Consejo: agregue un correo de recuperación para poder restablecer su contraseña si la olvida.', true);
   mostrar('pantalla-datos-parejas');
@@ -77,8 +132,12 @@ function empezarConPaciente(e) {
     mensaje('#datos-parejas-mensaje', 'Ingrese el nombre del adulto mayor.');
     return;
   }
+  const elegido = document.querySelector('#niveles-parejas input[name="nivel"]:checked');
+  nivel = NIVELES.find((n) => n.id === (elegido && elegido.value)) || NIVELES.find((n) => n.id === NIVEL_INICIAL);
+
   paciente = nombre;
-  $('#parejas-jugador').textContent = `Adulto mayor: ${paciente}`;
+  $('#parejas-jugador').textContent =
+    `Adulto mayor: ${paciente} · Nivel: ${describirTablero(nivel.columnas, nivel.filas)}`;
   reiniciarParejas();
   mostrar('pantalla-parejas');
 }
@@ -109,7 +168,9 @@ function pintarCarta(carta) {
 }
 
 function crearTablero() {
-  const pares = PAREJAS.flatMap((p) => [
+  totalParejas = (nivel.columnas * nivel.filas) / 2;
+  const elegidos = mezclar(SIMBOLOS).slice(0, totalParejas);
+  const pares = elegidos.flatMap((p) => [
     { ...p, descubierta: false, encontrada: false },
     { ...p, descubierta: false, encontrada: false }
   ]);
@@ -117,6 +178,9 @@ function crearTablero() {
 
   const tablero = $('#tablero');
   tablero.replaceChildren();
+  tablero.style.setProperty('--columnas', String(nivel.columnas));
+  tablero.dataset.columnas = String(nivel.columnas);
+
   cartas.forEach((carta) => {
     const boton = document.createElement('button');
     boton.type = 'button';
@@ -161,7 +225,7 @@ function comprobar(a, b) {
     actualizarInformacion();
     bloqueado = false;
 
-    if (encontradas === PAREJAS.length) terminarPartida();
+    if (encontradas === totalParejas) terminarPartida();
   } else {
     $('#parejas-mensaje').textContent = 'Casi… inténtelo nuevamente';
     actualizarInformacion();
@@ -179,7 +243,13 @@ function comprobar(a, b) {
 // ---------------------------------------------------------------
 function terminarPartida() {
   const duracionSeg = Math.max(0, Math.round((Date.now() - inicio) / 1000));
-  pendiente = { nombrePaciente: paciente, intentos, duracionSeg };
+  pendiente = {
+    nombrePaciente: paciente,
+    columnas: nivel.columnas,
+    filas: nivel.filas,
+    intentos,
+    duracionSeg
+  };
 
   $('#parejas-intentos-final').textContent = String(intentos);
   $('#parejas-tiempo-final').textContent = formatearTiempo(duracionSeg);
@@ -224,8 +294,8 @@ export function reiniciarParejas() {
   $('#parejas-reintentar-guardado').hidden = true;
   mensaje('#parejas-guardado');
   $('#parejas-mensaje').textContent = 'Seleccione una tarjeta';
+  crearTablero();            // calcula totalParejas
   actualizarInformacion();
-  crearTablero();
 }
 
 export function detenerParejas() {
@@ -253,12 +323,17 @@ async function abrirHistorialParejas() {
     }
     partidas.forEach((p) => {
       const fila = document.createElement('tr');
-      [p.nombrePaciente, formatearFecha(p.fecha), String(p.intentos), formatearTiempo(p.duracionSeg)]
-        .forEach((valor) => {
-          const celda = document.createElement('td');
-          celda.textContent = valor;
-          fila.append(celda);
-        });
+      [
+        p.nombrePaciente,
+        formatearFecha(p.fecha),
+        describirTablero(p.columnas, p.filas),
+        String(p.intentos),
+        formatearTiempo(p.duracionSeg)
+      ].forEach((valor) => {
+        const celda = document.createElement('td');
+        celda.textContent = valor;
+        fila.append(celda);
+      });
       cuerpo.append(fila);
     });
     tabla.hidden = false;
@@ -272,11 +347,13 @@ async function abrirHistorialParejas() {
 // Conexion de los botones
 // ---------------------------------------------------------------
 export function iniciarParejas() {
+  pintarNiveles();
+
   $('#form-datos-parejas').addEventListener('submit', empezarConPaciente);
   $('#datos-parejas-historial').addEventListener('click', abrirHistorialParejas);
   $('#datos-parejas-salir').addEventListener('click', cerrarSesion);
 
-  $('#parejas-cambiar').addEventListener('click', irADatosParejas);
+  $('#parejas-cambiar').addEventListener('click', () => irADatosParejas(true));
   $('#parejas-reiniciar').addEventListener('click', reiniciarParejas);
   $('#parejas-otra').addEventListener('click', reiniciarParejas);
   $('#parejas-reintentar-guardado').addEventListener('click', guardarResultado);
@@ -284,5 +361,5 @@ export function iniciarParejas() {
   $('#parejas-ayuda').addEventListener('click', () => $('#dialogo-ayuda').showModal());
   $('#ayuda-cerrar').addEventListener('click', () => $('#dialogo-ayuda').close());
 
-  $('#historial-parejas-volver').addEventListener('click', irADatosParejas);
+  $('#historial-parejas-volver').addEventListener('click', () => irADatosParejas(true));
 }

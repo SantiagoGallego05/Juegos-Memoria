@@ -133,24 +133,30 @@ input[type="text"], input[type="password"], textarea {
   gap: 8px; text-align: center; font-size: 1.3rem; font-weight: 700; margin-bottom: 16px;
 }
 
-.tablero { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+.tablero {
+  display: grid;
+  grid-template-columns: repeat(var(--columnas, 4), 1fr);
+  gap: 16px;
+  max-width: calc(var(--columnas, 4) * 175px);   /* con pocas columnas las tarjetas no se vuelven enormes */
+  margin: 0 auto;
+}
 
 .carta {
   font: inherit;
   aspect-ratio: 1 / 1;
-  min-height: 130px;
+  min-height: 0;
   border-radius: 16px;
   border: 3px solid var(--azul);
   background: var(--azul);
   color: #fff;
-  font-size: 3rem;
+  font-size: clamp(1.8rem, 6vw, 3rem);
   font-weight: 700;
   cursor: pointer;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
   padding: 6px;
 }
 .carta.descubierta { background: #fff; color: var(--tinta); }
-.carta.descubierta .carta-simbolo { font-size: 3.2rem; line-height: 1; }
+.carta.descubierta .carta-simbolo { font-size: clamp(1.8rem, 6vw, 3.2rem); line-height: 1; }
 .carta.descubierta .carta-nombre { font-size: 1.1rem; }
 .carta.encontrada { background: var(--exito-fondo); border-color: var(--verde); cursor: default; }
 
@@ -202,7 +208,10 @@ dialog::backdrop { background: rgba(19, 35, 58, 0.6); }
 @media (max-width: 640px) {
   html { font-size: 17px; }
   h1 { font-size: 1.8rem; }
-  .tablero { grid-template-columns: repeat(2, 1fr); }
+  .tablero { gap: 8px; max-width: none; }
+  .tablero[data-columnas="4"] .carta-nombre,
+  .tablero[data-columnas="5"] .carta-nombre { display: none; }
+  .carta.descubierta .carta-simbolo { font-size: clamp(1.4rem, 8vw, 2.4rem); }
   .cronometro { font-size: 7rem; }
   .boton { width: 100%; }
   .boton-chico { width: auto; }
@@ -226,3 +235,28 @@ dialog::backdrop { background: rgba(19, 35, 58, 0.6); }
 .tabla-parejas td:nth-child(n+3), .tabla-parejas th:nth-child(n+3) { text-align: right; white-space: nowrap; }
 .aviso-exito .fila-botones { margin-bottom: 4px; }
 .aviso-exito [hidden] { display: none; }
+
+/* ---------- Opciones con tarjetas (dificultad, fuente de imagenes) ---------- */
+.niveles { border: 2px solid var(--borde); border-radius: var(--radio); padding: 10px 14px 14px; margin: 6px 0; min-width: 0; }
+.niveles legend { font-size: 1.2rem; font-weight: 700; padding: 0 8px; }
+.opciones { display: grid; gap: 10px; }
+.opcion {
+  display: grid; grid-template-columns: auto 1fr; column-gap: 14px; align-items: center;
+  padding: 12px 14px; border: 2px solid var(--borde); border-radius: 12px; background: #fff; cursor: pointer;
+}
+.opcion input { grid-row: span 2; width: 24px; height: 24px; margin: 0; accent-color: var(--azul); }
+.opcion-titulo { font-weight: 700; font-size: 1.2rem; }
+.opcion .opcion-detalle { font-size: 1rem; font-weight: 400; color: var(--tinta-suave); }
+.opcion:has(input:checked) { border-color: var(--azul); background: #eaf1fb; }
+.opcion:has(input:disabled) { opacity: 0.55; cursor: not-allowed; }
+.opcion:focus-within { outline: 4px solid #f5b400; outline-offset: 2px; }
+
+/* ---------- Mis imagenes ---------- */
+.boton-rojo { background: var(--error); }
+.galeria { list-style: none; margin: 16px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 16px; }
+.galeria li { background: #fff; border: 2px solid var(--borde); border-radius: var(--radio); padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.galeria img { width: 100%; height: 140px; object-fit: cover; border-radius: 8px; background: #e8eef6; }
+.galeria .nombre-imagen { font-size: 1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.galeria .boton { min-width: 0; width: 100%; }
+.imagen-eliminada { width: 130px; height: 100px; flex: none; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 0.95rem; color: var(--tinta-suave); background: #e8eef6; border-radius: 8px; padding: 6px; }
+@media (max-width: 640px) { .imagen-eliminada { width: 100%; height: 80px; } }

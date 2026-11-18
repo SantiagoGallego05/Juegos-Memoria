@@ -3,8 +3,10 @@
 import { $, mostrar, mensaje, formatearFecha } from './nav.js';
 import { api } from './api.js';
 import { obtenerUsuario, exigirSesion, sesionExpirada, cerrarSesion } from './sesion.js';
+import { abrirMisImagenes } from './imagenes.js';
 
 const SEGUNDOS_CRONOMETRO = 5;
+const CANTIDAD_MINIMA = 5;           // imagenes por partida
 
 let paciente = '';
 let imagenes = [];
@@ -38,6 +40,30 @@ function irADatos() {
   $('#datos-iniciar').disabled = false;
   mostrar('pantalla-datos');
   $('#datos-paciente').focus();
+  actualizarFuentes();
+}
+
+// Habilita "Solo las mias" / "Las del juego y las mias" segun cuantas imagenes propias hay
+async function actualizarFuentes() {
+  const mias = document.querySelector('#form-datos input[name="fuente"][value="mias"]');
+  const todas = document.querySelector('#form-datos input[name="fuente"][value="todas"]');
+  try {
+    const { imagenes } = await api('/api/mis-imagenes');
+    const total = imagenes.length;
+    mias.disabled = total < CANTIDAD_MINIMA;
+    todas.disabled = total === 0;
+    $('#fuente-mias-detalle').textContent = total >= CANTIDAD_MINIMA
+      ? `Tiene ${total} imágenes subidas`
+      : `Tiene ${total}; necesita al menos ${CANTIDAD_MINIMA}. Súbalas en «Mis imágenes».`;
+    const elegida = document.querySelector('#form-datos input[name="fuente"]:checked');
+    if (elegida && elegida.disabled) {
+      document.querySelector('#form-datos input[name="fuente"][value="juego"]').checked = true;
+    }
+  } catch (err) {
+    if (err.estado === 401) return sesionPerdida();
+    mias.disabled = true;
+    todas.disabled = true;
+  }
 }
 
 // ---------------------------------------------------------------
@@ -54,7 +80,8 @@ async function iniciarPartida(e) {
   mensaje('#datos-mensaje');
   $('#datos-iniciar').disabled = true;
   try {
-    const datos = await api('/api/imagenes/aleatorias');
+    const fuente = document.querySelector('#form-datos input[name="fuente"]:checked').value;
+    const datos = await api(`/api/imagenes/aleatorias?fuente=${encodeURIComponent(fuente)}`);
     paciente = nombre;
     imagenes = datos.imagenes;
     respuestas = imagenes.map(() => '');
@@ -98,7 +125,7 @@ function mostrarImagenActual() {
   const img = $('#imagen-actual');
   img.alt = `Imagen ${indice + 1} de ${imagenes.length}`;
   img.onerror = () => mensaje('#imagen-mensaje', 'No se pudo cargar la imagen. Puede continuar con la siguiente.');
-  img.src = rutaImagen(imagenes[indice]);
+  img.src = imagenes[indice].url;
 
   const ultima = indice === imagenes.length - 1;
   $('#btn-siguiente').textContent = ultima ? 'Finalizar' : 'Siguiente';
@@ -130,7 +157,7 @@ async function guardarPartida() {
       method: 'POST',
       body: {
         nombrePaciente: paciente,
-        respuestas: imagenes.map((imagen, i) => ({ imagen, respuesta: respuestas[i] }))
+        respuestas: imagenes.map((im, i) => ({ imagen: im.nombre, imagenId: im.imagenId, respuesta: respuestas[i] }))
       }
     });
     $('#final-mensaje').textContent =
@@ -284,7 +311,13 @@ async function verDetalle(id) {
       item.className = 'detalle-item';
 
       const img = document.createElement('img');
-      img.src = rutaImagen(f.imagen);
+      img.src = f.imagenId ? `/api/mis-imagenes/${f.imagenId}` : rutaImagen(f.imagen);
+      img.onerror = () => {                     // por ejemplo, una imagen propia que se eliminó despues
+        const aviso = document.createElement('div');
+        aviso.className = 'imagen-eliminada';
+        aviso.textContent = 'Imagen no disponible';
+        img.replaceWith(aviso);
+      };
       img.alt = `Imagen ${f.orden}`;
 
       const texto = document.createElement('p');
@@ -324,6 +357,7 @@ export function iniciarRecuerdos() {
   $('#form-datos').addEventListener('submit', iniciarPartida);
   $('#datos-salir').addEventListener('click', cerrarSesion);
   $('#datos-historial').addEventListener('click', abrirHistorial);
+  $('#datos-imagenes').addEventListener('click', () => abrirMisImagenes(irADatos));
 
   $('#btn-microfono').addEventListener('click', alternarGrabacion);
   $('#btn-siguiente').addEventListener('click', avanzar);

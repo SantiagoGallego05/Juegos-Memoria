@@ -341,15 +341,153 @@ app.put('/api/correo', requiereSesion, async (req, res, next) => {
 // Juego de Recuerdos
 // ------------------------------------------------------------
 
-// Elige 5 imagenes al azar de la carpeta public/imagenes
-app.get('/api/imagenes/aleatorias', requiereSesion, (req, res) => {
-  const disponibles = listarImagenes();
-  if (disponibles.length < CANTIDAD_IMAGENES) {
-    return res.status(500).json({
-      error: `Se necesitan al menos ${CANTIDAD_IMAGENES} imágenes en la carpeta public/imagenes. Encontradas: ${disponibles.length}.`
+// Elige 5 imagenes al azar. ?fuente=juego (las de la carpeta public/imagenes),
+// mias (las que subio el responsable) o todas (ambas).
+const FUENTES = ['juego', 'mias', 'todas'];
+
+app.get('/api/imagenes/aleatorias', requiereSesion, async (req, res, next) => {
+  try {
+    const fuente = FUENTES.includes(req.query.fuente) ? req.query.fuente : 'juego';
+    const candidatas = [];
+
+    if (fuente !== 'mias') {
+      for (const nombre of listarImagenes()) {
+        candidatas.push({ nombre, url: `imagenes/${encodeURIComponent(nombre)}`, imagenId: null });
+      }
+    }
+
+    let propias = 0;
+    if (fuente !== 'juego') {
+      const [filas] = await pool.execute(
+        'SELECT id, nombre FROM imagenes_usuario WHERE usuario_id = ?',
+        [req.session.usuario.id]
+      );
+      propias = filas.length;
+      for (const f of filas) {
+        candidatas.push({ nombre: f.nombre, url: `/api/mis-imagenes/${f.id}`, imagenId: f.id });
+      }
+    }
+
+    if (candidatas.length < CANTIDAD_IMAGENES) {
+      const error = fuente === 'mias'
+        ? `Necesita al menos ${CANTIDAD_IMAGENES} imágenes propias. Ahora tiene ${propias}.`
+        : `Se necesitan al menos ${CANTIDAD_IMAGENES} imágenes. Encontradas: ${candidatas.length}.`;
+      return res.status(400).json({ error });
+    }
+    res.json({ imagenes: mezclar(candidatas).slice(0, CANTIDAD_IMAGENES) });
+  } catch (err) { next(err); }
+});
+
+// ------------------------------------------------------------
+// Mis imagenes: fotos que sube cada responsable (privadas de quien las sube)
+// ------------------------------------------------------------
+const MAX_IMAGENES_USUARIO = 30;
+const MAX_BYTES_IMAGEN = 2 * 1024 * 1024;
+const TIPOS_IMAGEN = ['image/jpeg', 'image/png', 'image/webp'];
+
+// Se mira el contenido real del archivo, no lo que diga el navegador
+function detectarTipo(b) {
+  if (!Buffer.isBuffer(b) || b.length < 12) return null;
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'image/jpeg';
+  if (b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'image/png';
+  if (b.toString('latin1', 0, 4) === 'RIFF' && b.toString('latin1', 8, 12) === 'WEBP') return 'image/webp';
+  return null;
+}
+
+function limpiarNombre(valor) {
+  if (typeof valor !== 'string') return '';
+  return valor.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 100);
+}
+
+app.get('/api/mis-imagenes', requiereSesion, async (req, res, next) => {
+  try {
+    const [filas] = await pool.execute(
+      `SELECT id, nombre, bytes, creada_en AS creada
+         FROM imagenes_usuario
+        WHERE usuario_id = ?
+        ORDER BY creada_en DESC, id DESC`,
+      [req.session.usuario.id]
+    );
+    res.json({ imagenes: filas, maximo: MAX_IMAGENES_USUARIO });
+  } catch (err) { next(err); }
+});
+
+app.post('/api/mis-imagenes', requiereSesion,
+  express.raw({ type: TIPOS_IMAGEN, limit: MAX_BYTES_IMAGEN + 1024 }),
+  async (req, res, next) => {
+    try {
+      const datos = req.body;
+      if (!Buffer.isBuffer(datos) || datos.length === 0) {
+        return res.status(400).json({ error: 'Envíe una imagen JPG, PNG o WEBP.' });
+      }
+      if (datos.length > MAX_BYTES_IMAGEN) {
+        return res.status(413).json({ error: 'La imagen es demasiado grande (máximo 2 MB).' });
+      }
+      const tipo = detectarTipo(datos);
+      if (!tipo) {
+        return res.status(400).json({ error: 'El archivo no es una imagen válida (use JPG, PNG o WEBP).' });
+      }
+
+      const usuarioId = req.session.usuario.id;
+      const [cuenta] = await pool.execute(
+        'SELECT COUNT(*) AS total FROM imagenes_usuario WHERE usuario_id = ?',
+        [usuarioId]
+      );
+      if (Number(cuenta[0].total) >= MAX_IMAGENES_USUARIO) {
+        return res.status(409).json({
+          error: `Llegó al máximo de ${MAX_IMAGENES_USUARIO} imágenes. Elimine alguna para subir otra.`
+        });
+      }
+
+      const nombre = limpiarNombre(req.query.nombre) || 'Imagen';
+      const [r] = await pool.execute(
+        'INSERT INTO imagenes_usuario (usuario_id, nombre, tipo, bytes, datos) VALUES (?, ?, ?, ?, ?)',
+        [usuarioId, nombre, tipo, datos.length, datos]
+      );
+      res.status(201).json({ ok: true, id: r.insertId, nombre });
+    } catch (err) { next(err); }
+  });
+
+app.get('/api/mis-imagenes/:id', requiereSesion, async (req, res, next) => {
+  try {
+    const id = Number.parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ error: 'Identificador no válido.' });
+    }
+    const [filas] = await pool.execute(
+      'SELECT tipo, datos FROM imagenes_usuario WHERE id = ? AND usuario_id = ?',
+      [id, req.session.usuario.id]
+    );
+    if (!filas.length) {
+      return res.status(404).json({ error: 'Imagen no encontrada.' });
+    }
+    res.set({
+      'Content-Type': filas[0].tipo,
+      // no-cache: el navegador siempre vuelve a preguntar, y aqui se revisa la
+      // sesion; asi, en un computador compartido, otra cuenta no ve fotos ajenas
+      'Cache-Control': 'private, no-cache',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': "default-src 'none'; sandbox"
     });
-  }
-  res.json({ imagenes: mezclar(disponibles).slice(0, CANTIDAD_IMAGENES) });
+    res.send(filas[0].datos);
+  } catch (err) { next(err); }
+});
+
+app.delete('/api/mis-imagenes/:id', requiereSesion, async (req, res, next) => {
+  try {
+    const id = Number.parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ error: 'Identificador no válido.' });
+    }
+    const [r] = await pool.execute(
+      'DELETE FROM imagenes_usuario WHERE id = ? AND usuario_id = ?',
+      [id, req.session.usuario.id]
+    );
+    if (!r.affectedRows) {
+      return res.status(404).json({ error: 'Imagen no encontrada.' });
+    }
+    res.json({ ok: true });
+  } catch (err) { next(err); }
 });
 
 // Guarda una partida completa (equivale al antiguo Resultado_*.txt)
@@ -367,14 +505,39 @@ app.post('/api/partidas', requiereSesion, async (req, res, next) => {
     }
 
     const permitidas = new Set(listarImagenes());
+    const hayId = (r) => r && r.imagenId !== null && r.imagenId !== undefined;
+
+    // Las imagenes propias se comprueban en la base: deben ser de este usuario
+    const ids = respuestas.filter(hayId).map((r) => r.imagenId);
+    if (!ids.every((id) => Number.isInteger(id) && id > 0)) {
+      return res.status(400).json({ error: 'Imagen no válida en la partida.' });
+    }
+    const propias = new Map();
+    if (ids.length) {
+      const [encontradas] = await pool.execute(
+        `SELECT id, nombre FROM imagenes_usuario WHERE usuario_id = ? AND id IN (${ids.map(() => '?').join(',')})`,
+        [req.session.usuario.id, ...ids]
+      );
+      encontradas.forEach((f) => propias.set(f.id, f.nombre));
+    }
+
     const filas = [];
     for (let i = 0; i < respuestas.length; i++) {
-      const imagen = texto(respuestas[i] && respuestas[i].imagen, 255);
-      const respuesta = texto(respuestas[i] && respuestas[i].respuesta, 2000);
-      if (!permitidas.has(imagen)) {
+      const r = respuestas[i] || {};
+      const respuesta = texto(r.respuesta, 2000);
+      let imagen;
+      let imagenId = null;
+      if (hayId(r)) {
+        imagenId = r.imagenId;
+        imagen = propias.get(imagenId);          // el nombre sale de la base, no del navegador
+      } else {
+        const nombre = texto(r.imagen, 255);
+        imagen = permitidas.has(nombre) ? nombre : undefined;
+      }
+      if (!imagen) {
         return res.status(400).json({ error: 'Imagen no válida en la partida.' });
       }
-      filas.push([i + 1, imagen, respuesta]);
+      filas.push([i + 1, imagen, imagenId, respuesta]);
     }
 
     conexion = await pool.getConnection();
@@ -387,7 +550,7 @@ app.post('/api/partidas', requiereSesion, async (req, res, next) => {
     const partidaId = resultado.insertId;
 
     await conexion.query(
-      'INSERT INTO respuestas (partida_id, orden, imagen, respuesta) VALUES ?',
+      'INSERT INTO respuestas (partida_id, orden, imagen, imagen_id, respuesta) VALUES ?',
       [filas.map(f => [partidaId, ...f])]
     );
 
@@ -395,6 +558,9 @@ app.post('/api/partidas', requiereSesion, async (req, res, next) => {
     res.status(201).json({ ok: true, partidaId });
   } catch (err) {
     if (conexion) await conexion.rollback().catch(() => {});
+    if (err.code === 'ER_NO_REFERENCED_ROW_2') {
+      return res.status(409).json({ error: 'Una de las imágenes ya no existe. Inicie una partida nueva.' });
+    }
     next(err);
   } finally {
     if (conexion) conexion.release();
@@ -433,7 +599,7 @@ app.get('/api/partidas/:id', requiereSesion, async (req, res, next) => {
     }
 
     const [respuestas] = await pool.execute(
-      'SELECT orden, imagen, respuesta FROM respuestas WHERE partida_id = ? ORDER BY orden',
+      'SELECT orden, imagen, imagen_id AS imagenId, respuesta FROM respuestas WHERE partida_id = ? ORDER BY orden',
       [id]
     );
     res.json({ partida: partidas[0], respuestas });
@@ -443,25 +609,30 @@ app.get('/api/partidas/:id', requiereSesion, async (req, res, next) => {
 // ------------------------------------------------------------
 // Juego de Parejas
 // ------------------------------------------------------------
-const PAREJAS_TOTAL = 4; // con 4 parejas, el minimo posible de intentos es 4
+// Tableros permitidos [columnas, filas]. Debe coincidir con public/js/parejas.js
+const TABLEROS = [[3, 2], [4, 2], [4, 3], [4, 4], [5, 4]];
 
 app.post('/api/parejas', requiereSesion, async (req, res, next) => {
   try {
     const nombrePaciente = texto(req.body.nombrePaciente, 100);
-    const { intentos, duracionSeg } = req.body;
+    const { intentos, duracionSeg, columnas, filas } = req.body;
 
     if (!nombrePaciente) {
       return res.status(400).json({ error: 'Falta el nombre del adulto mayor.' });
     }
-    if (!Number.isInteger(intentos) || intentos < PAREJAS_TOTAL || intentos > 999 ||
+    if (!TABLEROS.some(([c, f]) => c === columnas && f === filas)) {
+      return res.status(400).json({ error: 'Tamaño de tablero no válido.' });
+    }
+    const parejas = (columnas * filas) / 2;   // el minimo posible de intentos es una pareja por intento
+    if (!Number.isInteger(intentos) || intentos < parejas || intentos > 999 ||
         !Number.isInteger(duracionSeg) || duracionSeg < 0 || duracionSeg > 60000) {
       return res.status(400).json({ error: 'Datos de la partida no válidos.' });
     }
 
     const [r] = await pool.execute(
-      `INSERT INTO partidas_parejas (usuario_id, nombre_paciente, intentos, duracion_seg)
-       VALUES (?, ?, ?, ?)`,
-      [req.session.usuario.id, nombrePaciente, intentos, duracionSeg]
+      `INSERT INTO partidas_parejas (usuario_id, nombre_paciente, columnas, filas, intentos, duracion_seg)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [req.session.usuario.id, nombrePaciente, columnas, filas, intentos, duracionSeg]
     );
     res.status(201).json({ ok: true, partidaId: r.insertId });
   } catch (err) { next(err); }
@@ -470,7 +641,7 @@ app.post('/api/parejas', requiereSesion, async (req, res, next) => {
 app.get('/api/parejas', requiereSesion, async (req, res, next) => {
   try {
     const [filas] = await pool.execute(
-      `SELECT id, nombre_paciente AS nombrePaciente, intentos,
+      `SELECT id, nombre_paciente AS nombrePaciente, columnas, filas, intentos,
               duracion_seg AS duracionSeg, fecha
          FROM partidas_parejas
         WHERE usuario_id = ?
@@ -488,6 +659,12 @@ app.get('/api/parejas', requiereSesion, async (req, res, next) => {
 app.use('/api', (req, res) => res.status(404).json({ error: 'Ruta no encontrada.' }));
 
 app.use((err, req, res, next) => {
+  if (err.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'El archivo es demasiado grande.' });
+  }
+  if (err.type === 'entity.parse.failed') {
+    return res.status(400).json({ error: 'Solicitud no válida.' });
+  }
   console.error(err);
   res.status(500).json({ error: 'Error del servidor. Intente de nuevo.' });
 });
